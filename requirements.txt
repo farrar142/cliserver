@@ -1,0 +1,5 @@
+wheel
+django
+django-ninja
+paramiko
+uvicorn

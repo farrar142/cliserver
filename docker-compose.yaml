@@ -1,0 +1,11 @@
+version: "3"
+
+services:
+  cliserver:
+    build: .
+    container_name : cliserver
+    # command: python3 manage.py runserver 0.0.0.0:8888
+    volumes:
+        - .:/usr/src/app
+    ports:
+        - 8888:8888
