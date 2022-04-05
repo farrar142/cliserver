@@ -1,6 +1,4 @@
-# Create your tests here.
 from pprint import pprint
-# from mysite.functions import auto_login
 import paramiko
 import time
 import re
@@ -17,29 +15,9 @@ class CliInterface:
 
     def get_or_connect(self, params: dict):
         user = 'test'
-        # try:
-        #     informs = CliInterface.informs.get(user)
-        #     self = informs.get("self")
-        #     self.cli = informs.get("cli")
-        #     self.target = informs.get("target")
-        # except:
         hostname = params.get("hostname")
         username = params.get("username")
         password = params.get("password")
-        # pemKey는 필요 없을 것 같음.
-        # user = 'sandring'
-        # sshPath = f"./ssh/user/{user}"
-        # pemKey = "/private.pem"
-        # pemText = "thisisSSHPrivateKey"
-        # if not os.path.isdir(sshPath):
-        #     os.makedirs(sshPath)
-        # f = open(sshPath+pemKey, 'w')
-        # f.write(pemText)
-        # f.close()
-        # if os.path.isfile(sshPath+pemKey):
-        #     os.remove(sshPath+pemKey)
-        # if os.path.isdir(sshPath):
-        #     os.removedirs(sshPath)
 
         self.cli = paramiko.SSHClient()
         self.cli.load_system_host_keys

@@ -49,3 +49,11 @@ def cli(request, form: CliForm):
     print(form)
     print("reached")
     return CliInterface().from_api(form.hostname, form.username, form.password, form.directory, form.cmd, form.port)
+
+
+@sync_to_async
+@api.get("get")
+def cli(request, form: CliForm):
+    print(form)
+    print("reached")
+    return CliInterface().from_api(form.hostname, form.username, form.password, form.directory, form.cmd, form.port)
