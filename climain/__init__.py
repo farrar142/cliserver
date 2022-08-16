@@ -1,8 +1,23 @@
 from pprint import pprint
+from typing import Any, Dict, TypeVar, TypedDict
 import paramiko
 import time
 import re
 import os
+
+
+class HostInformation(TypedDict):
+    hostname: str
+    username: str
+    password: str
+    port: int
+
+
+class ParamikoConnectInformation(TypedDict):
+    self: Any
+    cli: paramiko.SSHClient
+    target: paramiko.Channel
+    params: HostInformation
 
 
 def ansi_decoder(context) -> str:
@@ -10,48 +25,18 @@ def ansi_decoder(context) -> str:
     return ansi_escape.sub('', context)
 
 
-class CliInterface:
-    informs = {}
+class CliBase:
+    cli: paramiko.SSHClient
+    target: paramiko.Channel
 
-    def get_or_connect(self, params: dict):
-        user = 'test'
-        hostname = params.get("hostname")
-        username = params.get("username")
-        password = params.get("password")
-
-        self.cli = paramiko.SSHClient()
-        self.cli.load_system_host_keys
-        self.cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self.cli.connect(**params, timeout=3)  # 여기까지 해줘야 invokeshell이열림
-        self.target = self.cli.invoke_shell()
-        self.target.settimeout(3)
-        informs = {
-            user: {
-                "self": self,
-                "cli": self.cli,
-                "target": self.target,
-                "params": params
-            }
-        }
-        CliInterface.informs.update(informs)
+    def get_or_connect(self):
+        raise Exception("override this")
 
     def close(self):
         self.target.close()
 
     def connect(self, info: dict):
         self.cli.connect(**info)
-
-    def run(self):
-        while True:
-            cmd = input("입력) ")
-            if cmd == "exit":
-                return
-            self.send(cmd)
-            self.receive(True)
-
-    def single_order(self, cmd):
-        self.send(cmd)
-        return self.receive(True)
 
     def send(self, cmd):
         self.target.send(cmd+"\n")
@@ -66,9 +51,31 @@ class CliInterface:
                 time.sleep(0.5)
         result = self.target.recv(65536).decode('utf-8')
         result = ansi_decoder(result)
-        # if bool:
-        #     print(result)
         return result
+
+
+class CliInterface(CliBase):
+
+    def get_or_connect(self, params: HostInformation):
+        self.cli = paramiko.SSHClient()
+        self.cli.load_system_host_keys
+        self.cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self.cli.connect(**params, timeout=3)  # 여기까지 해줘야 invokeshell이열림
+        self.target = self.cli.invoke_shell()
+        self.target.settimeout(3)
+
+    def run(self):
+        while True:
+            cmd = input("입력) ")
+            if cmd == "exit":
+                return
+            self.send(cmd)
+            self.receive(True)
+
+    def single_order(self, cmd):
+        self.send(cmd)
+        return self.receive(True)
+
     #커스텀 로직들#
 
     def ls_al(self, *args):
@@ -100,12 +107,9 @@ class CliInterface:
     def custom_cmd(self, cmd, *args):
         return getattr(self, cmd)(*args)
 
-    def show(self):
-        pprint(CliInterface.informs)
-
     @classmethod
-    def from_api(cls, hostname, username, password, directory, cmd="", port=22):
-        setting = {
+    def from_api(cls, hostname: str, username: str, password: str, directory, cmd="", port: int = 22):
+        setting: HostInformation = {
             "hostname": hostname,
             "username": username,
             "password": password,
