@@ -1,4 +1,4 @@
-version: "3"
+version: '3'
 
 services:
   cliserver:
@@ -8,9 +8,10 @@ services:
       retries: 30
       start_period: 60s
     build: .
-    container_name : cliserver
+    container_name: cliserver
+    working_dir: /usr/src/app
     # command: python3 manage.py runserver 0.0.0.0:8888
     volumes:
-        - .:/usr/src/app
+      - .:/usr/src/app
     ports:
-        - 8888:8888
+      - 8200:8888

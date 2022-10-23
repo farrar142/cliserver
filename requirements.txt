@@ -4,3 +4,15 @@ django-ninja
 paramiko
 uvicorn
 django-cors-headers
+
+redis
+django-redis
+channels
+channels_redis
+websockets
+python-dotenv
+unidecode
+
+autopep8
+django-celery-results
+django-celery-beat

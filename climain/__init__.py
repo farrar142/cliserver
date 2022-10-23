@@ -1,9 +1,16 @@
-from pprint import pprint
-from typing import Any, Dict, TypeVar, TypedDict
-import paramiko
-import time
-import re
+import asyncio
+from io import BytesIO
 import os
+import re
+import threading
+import time
+from select import select
+from typing import Any, Dict, Optional, TypedDict, TypeVar
+
+import paramiko
+from paramiko.channel import ChannelFile
+from typing_extensions import Self
+from .tasks import send_ws_message
 
 
 class HostInformation(TypedDict):
@@ -25,15 +32,47 @@ def ansi_decoder(context) -> str:
     return ansi_escape.sub('', context)
 
 
+class TimeoutChannel:
+
+    def __init__(self, channel: paramiko.Channel, timeout):
+        self.expired = False
+        self.channel = channel
+        self.timeout = timeout
+
+    def __enter__(self):
+        self.timer = threading.Timer(self.timeout, self.kill_client)
+        self.timer.start()
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        print("Exited Timeout. Timed out:", self.expired)
+        self.timer.cancel()
+
+        if exc_val:
+            return False  # Make sure the exceptions are re-raised
+
+        if self.expired:
+            return True
+
+    def kill_client(self):
+        self.expired = True
+        print("Should kill client")
+        if self.channel:
+            print("We have a channel")
+
+
 class CliBase:
     cli: paramiko.SSHClient
     target: paramiko.Channel
 
-    def get_or_connect(self):
+    @classmethod
+    def get_or_connect(cls):
         raise Exception("override this")
 
     def close(self):
         self.target.close()
+        self.cli.close()
 
     def connect(self, info: dict):
         self.cli.connect(**info)
@@ -55,14 +94,98 @@ class CliBase:
 
 
 class CliInterface(CliBase):
+    instances: Dict[int, Self] = {}
 
-    def get_or_connect(self, params: HostInformation):
+    @classmethod
+    def get_or_connect(cls, user_id: int, params: HostInformation):
+        instance = cls.instances.get(user_id)
+        if not instance:
+            return cls(user_id, params)
+        return instance
+
+    def __init__(self, user_id: int, params: HostInformation):
+        self.user_id = user_id
         self.cli = paramiko.SSHClient()
         self.cli.load_system_host_keys
         self.cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self.cli.connect(**params, timeout=3)  # 여기까지 해줘야 invokeshell이열림
+        self.cli.connect(**params, timeout=3, allow_agent=False)  # 여기까지
         self.target = self.cli.invoke_shell()
-        self.target.settimeout(3)
+        self.target.settimeout(10)
+        self.stdin = self.target.makefile('wb')
+        self.stdout = self.target.makefile('r')
+
+    def exec_command(self, command: str):
+        channel = self.target
+        with TimeoutChannel(self.target, 5):
+            # print(channel.recv(2048).decode())
+            channel.send(f"{command}\n".encode())
+            res = line_buffered(self.target)
+            for i in res:
+                send_ws_message.delay(1, {
+                    'type': 'emit',
+                    "order": "order",
+                    "username": "username",
+                    "data": i
+                })
+        print("exit exec command")
+        # with TimeoutChannel(self.cli, 3) as c:
+        #     res = c.exec(
+        #         command)    # non-blocking
+        #     if not res:
+        #         return 0
+        #     ssh_stdin, ssh_stdout, ssh_stderr = res
+        #     # block til done, will complete quickly
+        #     exit_status = ssh_stdout.channel.recv_exit_status()
+        #     yield ssh_stdout.read().decode("utf8")
+
+    def execute(self, cmd):
+        """
+
+        :param cmd: the command to be executed on the remote computer
+        :examples:  execute('ls')
+                    execute('finger')
+                    execute('cd folder_name')
+        """
+        cmd = cmd.strip('\n')
+        self.stdin.write(cmd + '\n')
+        finish = 'end of stdOUT buffer. finished with exit status'
+        echo_cmd = 'echo {} $?'.format(finish)
+        self.stdin.write(echo_cmd + '\n')
+        shin = self.stdin
+        self.stdin.flush()
+
+        shout = []
+        sherr = []
+        exit_status = 0
+        for line in self.stdout:
+            if str(line).startswith(cmd) or str(line).startswith(echo_cmd):
+                # up for now filled with shell junk from stdin
+                shout = []
+            elif str(line).startswith(finish):
+                # our finish command ends with the exit status
+                exit_status = int(str(line).rsplit(maxsplit=1)[1])
+                if exit_status:
+                    # stderr is combined with stdout.
+                    # thus, swap sherr with shout in a case of failure.
+                    sherr = shout
+                    shout = []
+                break
+            else:
+                # get rid of 'coloring and formatting' special characters
+                shout.append(re.compile(
+                    r'(\x9B|\x1B\[)[0-?]*[ -/]*[@-~]').sub('', line).replace('\b', '').replace('\r', ''))
+
+        # first and last lines of shout/sherr contain a prompt
+        if shout and echo_cmd in shout[-1]:
+            shout.pop()
+        if shout and cmd in shout[0]:
+            shout.pop(0)
+        if sherr and echo_cmd in sherr[-1]:
+            sherr.pop()
+        if sherr and cmd in sherr[0]:
+            sherr.pop(0)
+
+        return shin, shout, sherr
 
     def run(self):
         while True:
@@ -108,7 +231,7 @@ class CliInterface(CliBase):
         return getattr(self, cmd)(*args)
 
     @classmethod
-    def from_api(cls, hostname: str, username: str, password: str, directory, cmd="", port: int = 22):
+    def from_api(cls, user_id: int, hostname: str, username: str, password: str, port: int = 22, *args, **kwargs):
         setting: HostInformation = {
             "hostname": hostname,
             "username": username,
@@ -116,14 +239,13 @@ class CliInterface(CliBase):
             "port": port
         }
         # print(setting)
-        test = CliInterface()
-        test.get_or_connect(setting)
-        test.receive()
-        test.custom_cmd("cd", directory)
-        result = test.single_order(cmd)
-        files = test.custom_cmd("ls_al")
-        test.close()
-        return {"files": files, "result": result}
+        instance = CliInterface.get_or_connect(user_id, setting)
+        return instance
+        # test.receive()
+        # test.custom_cmd("cd", directory)
+        # files = test.custom_cmd("ls_al")
+        # test.close()
+        # return {"files": files}
 
 
 # async def main():
@@ -141,3 +263,15 @@ class CliInterface(CliBase):
 #     CliInterface().from_api("49.50.174.121", "root",
 #                             "eowjsrhkddurtlehdrneowjsfh304qjsrlf28", "/home/test")
 # asyncio.run(main())
+def line_buffered(f: paramiko.Channel):
+    line_buf = ""
+    while not f.exit_status_ready():
+        try:
+            line_buf += f.recv(1).decode()  # .read(1).decode()
+            if line_buf.endswith('\n'):
+                yield line_buf
+                line_buf = ''
+
+        except StopIteration:
+            print("stop iter")
+            break

@@ -7,6 +7,7 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /usr/src/app
 
 COPY . .
+apk --update add openssh-client
 RUN apk update && apk add python3-dev \
                         gcc \
                         libc-dev \
@@ -15,4 +16,4 @@ RUN pip3 install -r requirements.txt
 
 # ENTRYPOINT python3 manage.py makemigrations && python3 manage.py migrate && tail -f /dev/null
 EXPOSE 8888
-ENTRYPOINT python3 manage.py makemigrations && python3 manage.py migrate && uvicorn base.asgi:application --reload --host 0.0.0.0 --port 8888
+ENTRYPOINT tail -f /dev/null

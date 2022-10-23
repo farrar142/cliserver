@@ -12,17 +12,17 @@ cliserver api
 """
 
 
-class MyRenderer(BaseRenderer):
-    media_type = "application/json"
+# class MyRenderer(BaseRenderer):
+#     media_type = "application/json"
 
-    def render(self, request, data, *, response_status):
-        if data:
-            return json.dumps(converter(data))
-        else:
-            return json.dumps([])
+#     def render(self, request, data, *, response_status):
+#         if data:
+#             return json.dumps(converter(data))
+#         else:
+#             return json.dumps([])
 
 
-api = NinjaAPI(description=description, csrf=False, renderer=MyRenderer())
+api = NinjaAPI(description=description, csrf=False)
 
 
 class TokenSchema(Schema):
@@ -44,8 +44,14 @@ class CliForm(TokenSchema):
 
 
 @sync_to_async
+@api.get("abc")
+def yieldtest(request):
+    return {'data': 0}
+
+
+@sync_to_async
 @api.post("get")
-def cli(request, form: CliForm):
+def clione(request, form: CliForm):
     print(form)
     print("reached")
     return CliInterface().from_api(form.hostname, form.username, form.password, form.directory, form.cmd, form.port)
